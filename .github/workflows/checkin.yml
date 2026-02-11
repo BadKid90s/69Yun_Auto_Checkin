@@ -4,7 +4,7 @@ on:
   schedule:
     # UTC 时间 4:00-14:00 = 北京时间 12:00-22:00，每小时触发
     - cron: '0 4-14 * * *'
-  workflow_dispatch:  # 允许手动触发（手动触发直接执行，不随机）
+  workflow_dispatch:
 
 jobs:
   checkin:
@@ -18,11 +18,9 @@ jobs:
             echo "手动触发，直接执行"
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
-            # 生成 1-11 的随机数，只有等于 1 时才执行（约 1/11 概率，每天命中一次）
             RAND=$(shuf -i 1-11 -n 1)
             echo "随机数: $RAND"
             if [ "$RAND" -eq 1 ]; then
-              # 随机延迟 0-3500 秒（约 0-58 分钟）
               DELAY=$(shuf -i 0-3500 -n 1)
               echo "🎯 命中执行！延迟 ${DELAY} 秒后开始..."
               sleep $DELAY
@@ -42,7 +40,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
+          # ❌ 移除了 cache: 'pip'
 
       - name: 📦 安装依赖
         if: steps.random.outputs.should_run == 'true'
