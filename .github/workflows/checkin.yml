@@ -2,40 +2,70 @@ name: Checkin
 
 on:
   schedule:
-    - cron: '0 20 * * *'  # 每天 UTC 时间 20:00 执行（北京时间 04:00）
-  workflow_dispatch:  # 允许手动触发
+    # UTC 时间 4:00-14:00 = 北京时间 12:00-22:00，每小时触发
+    - cron: '0 4-14 * * *'
+  workflow_dispatch:  # 允许手动触发（手动触发直接执行，不随机）
 
 jobs:
   checkin:
     runs-on: ubuntu-latest
 
     steps:
+      - name: 🎲 随机决定是否执行 & 随机延迟
+        id: random
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "手动触发，直接执行"
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            # 生成 1-11 的随机数，只有等于 1 时才执行（约 1/11 概率，每天命中一次）
+            RAND=$(shuf -i 1-11 -n 1)
+            echo "随机数: $RAND"
+            if [ "$RAND" -eq 1 ]; then
+              # 随机延迟 0-3500 秒（约 0-58 分钟）
+              DELAY=$(shuf -i 0-3500 -n 1)
+              echo "🎯 命中执行！延迟 ${DELAY} 秒后开始..."
+              sleep $DELAY
+              echo "should_run=true" >> $GITHUB_OUTPUT
+            else
+              echo "⏭️ 本次跳过"
+              echo "should_run=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
       - name: 📥 检出代码
+        if: steps.random.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
       - name: 🏗️ 设置 Python 环境
+        if: steps.random.outputs.should_run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
 
       - name: 📦 安装依赖
-        run: |
-          pip install requests beautifulsoup4
+        if: steps.random.outputs.should_run == 'true'
+        run: pip install requests beautifulsoup4
 
       - name: ✅ 运行签到脚本
+        if: steps.random.outputs.should_run == 'true'
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           USER1: ${{ secrets.USER1 }}
           PASS1: ${{ secrets.PASS1 }}
         run: python checkin.py
+        timeout-minutes: 5
 
       - name: 📌 执行完成
+        if: steps.random.outputs.should_run == 'true'
         run: echo "签到任务已完成 ✅"
-        
+
   keepalive-workflow:
     name: Keepalive Workflow
     if: ${{ always() }}
+    needs: checkin
     runs-on: ubuntu-latest
     permissions:
       actions: write
