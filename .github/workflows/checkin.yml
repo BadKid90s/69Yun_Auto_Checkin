@@ -9,6 +9,8 @@ on:
 jobs:
   checkin:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: 🎲 随机决定是否执行 & 随机延迟
@@ -40,21 +42,59 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          # ❌ 移除了 cache: 'pip'
 
       - name: 📦 安装依赖
         if: steps.random.outputs.should_run == 'true'
         run: pip install requests beautifulsoup4
 
-      - name: ✅ 运行签到脚本
+      - name: ✅ 运行签到脚本并记录日志
         if: steps.random.outputs.should_run == 'true'
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           USER1: ${{ secrets.USER1 }}
           PASS1: ${{ secrets.PASS1 }}
-        run: python checkin.py
+        run: |
+          # 运行签到脚本，捕获输出
+          python checkin.py 2>&1 | tee output.txt
+
+          # 获取北京时间
+          DATETIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')
+          DATE=$(TZ='Asia/Shanghai' date +'%Y-%m-%d')
+
+          # 从输出中提取剩余流量
+          REMAINING=$(grep -oP '剩余流量: \K[^\s]+' output.txt || echo "未知")
+
+          # 从输出中提取签到结果
+          RESULT=$(grep -oP '签到结果: \K.*' output.txt || echo "未知")
+
+          # 从输出中提取签到获得的流量
+          TRAFFIC=$(grep -oP '获得了?\s*\K[\d.]+\s*(MB|GB|TB)' output.txt || echo "0MB")
+
+          # 如果日志文件不存在，创建表头
+          if [ ! -f checkin.log ]; then
+            echo "====================================================================" >> checkin.log
+            echo "                        69云自动签到日志                              " >> checkin.log
+            echo "====================================================================" >> checkin.log
+            echo "日期        时间      | 剩余流量    | 签到流量  | 签到结果" >> checkin.log
+            echo "--------------------------------------------------------------------" >> checkin.log
+          fi
+
+          # 写入日志
+          echo "${DATETIME} | ${REMAINING} | ${TRAFFIC} | ${RESULT}" >> checkin.log
+
+          echo "📝 日志已记录"
+          cat checkin.log
         timeout-minutes: 5
+
+      - name: 📝 提交日志到仓库
+        if: steps.random.outputs.should_run == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add checkin.log
+          git diff --staged --quiet || git commit -m "📝 签到日志 $(TZ='Asia/Shanghai' date +'%Y-%m-%d')"
+          git push
 
       - name: 📌 执行完成
         if: steps.random.outputs.should_run == 'true'
