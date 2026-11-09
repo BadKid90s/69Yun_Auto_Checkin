@@ -2,76 +2,61 @@ name: Checkin
 
 on:
   schedule:
-    # UTC 时间 4:00-14:00 = 北京时间 12:00-22:00，每小时触发
-    - cron: '0 4-14 * * *'
+    # UTC 4:50 = 北京时间 12:55，提前触发，留 5 分钟缓冲对抗 GitHub 延迟
+    - cron: '55 4 * * *'
   workflow_dispatch:
 
 jobs:
   checkin:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
 
     steps:
-      - name: 🎲 随机决定是否执行 & 随机延迟
-        id: random
+      - name: 🎯 等到 12:58~12:59 之间的随机时刻
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "手动触发，直接执行"
-            echo "should_run=true" >> $GITHUB_OUTPUT
           else
-            RAND=$(shuf -i 1-11 -n 1)
-            echo "随机数: $RAND"
-            if [ "$RAND" -eq 1 ]; then
-              DELAY=$(shuf -i 0-3500 -n 1)
-              echo "🎯 命中执行！延迟 ${DELAY} 秒后开始..."
-              sleep $DELAY
-              echo "should_run=true" >> $GITHUB_OUTPUT
+            OFFSET=$(shuf -i 0-119 -n 1)
+            BASE=$(TZ='Asia/Shanghai' date -d 'today 12:58:00' +%s)
+            TARGET=$((BASE + OFFSET))
+            WAIT=$((TARGET - $(date +%s)))
+            if [ "$WAIT" -gt 0 ]; then
+              echo "🎯 将于北京时间 $(TZ='Asia/Shanghai' date -d @${TARGET} +'%H:%M:%S') 执行，等待 ${WAIT} 秒"
+              sleep "$WAIT"
             else
-              echo "⏭️ 本次跳过"
-              echo "should_run=false" >> $GITHUB_OUTPUT
+              echo "⚠️ GitHub 触发延迟已超过目标时刻，立即执行"
             fi
           fi
 
       - name: 📥 检出代码
-        if: steps.random.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
       - name: 🏗️ 设置 Python 环境
-        if: steps.random.outputs.should_run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: 📦 安装依赖
-        if: steps.random.outputs.should_run == 'true'
         run: pip install requests beautifulsoup4
 
       - name: ✅ 运行签到脚本并记录日志
-        if: steps.random.outputs.should_run == 'true'
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           USER1: ${{ secrets.USER1 }}
           PASS1: ${{ secrets.PASS1 }}
         run: |
-          # 运行签到脚本，捕获输出
           python checkin.py 2>&1 | tee output.txt
 
-          # 获取北京时间
           DATETIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')
-          DATE=$(TZ='Asia/Shanghai' date +'%Y-%m-%d')
 
-          # 从输出中提取剩余流量
           REMAINING=$(grep -oP '剩余流量: \K[^\s]+' output.txt || echo "未知")
-
-          # 从输出中提取签到结果
           RESULT=$(grep -oP '签到结果: \K.*' output.txt || echo "未知")
-
-          # 从输出中提取签到获得的流量
           TRAFFIC=$(grep -oP '获得了?\s*\K[\d.]+\s*(MB|GB|TB)' output.txt || echo "0MB")
 
-          # 如果日志文件不存在，创建表头
           if [ ! -f checkin.log ]; then
             echo "====================================================================" >> checkin.log
             echo "                        69云自动签到日志                              " >> checkin.log
@@ -80,15 +65,12 @@ jobs:
             echo "--------------------------------------------------------------------" >> checkin.log
           fi
 
-          # 写入日志
           echo "${DATETIME} | ${REMAINING} | ${TRAFFIC} | ${RESULT}" >> checkin.log
-
           echo "📝 日志已记录"
           cat checkin.log
         timeout-minutes: 5
 
       - name: 📝 提交日志到仓库
-        if: steps.random.outputs.should_run == 'true'
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -97,7 +79,6 @@ jobs:
           git push
 
       - name: 📌 执行完成
-        if: steps.random.outputs.should_run == 'true'
         run: echo "签到任务已完成 ✅"
 
   keepalive-workflow:
